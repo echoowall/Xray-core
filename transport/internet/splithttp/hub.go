@@ -384,11 +384,22 @@ func (h *requestHandler) ServeHTTP(writer http.ResponseWriter, request *http.Req
 			Reader:         request.Body,
 			ResponseWriter: writer,
 		}
+		// Source-in-source-out: bind to the concrete local IP this request
+		// actually arrived on, not the listener's wildcard address (e.g. "[::]"
+		// or "0.0.0.0"). Go's net/http stores the per-connection local address
+		// in the request context under LocalAddrContextKey; without this, the
+		// "origin" sendThrough would read the wildcard and force egress onto a
+		// single (often IPv6) address. Falls back to the listener address when
+		// the key is absent (e.g. HTTP/3).
+		localAddr := h.localAddr
+		if la, ok := request.Context().Value(http.LocalAddrContextKey).(net.Addr); ok && la != nil {
+			localAddr = la
+		}
 		conn := splitConn{
 			writer:     httpSC,
 			reader:     httpSC,
 			remoteAddr: remoteAddr,
-			localAddr:  h.localAddr,
+			localAddr:  localAddr,
 		}
 		if sessionId != "" { // if not stream-one
 			conn.reader = currentSession.uploadQueue
